@@ -194,8 +194,10 @@
 const canvas = document.getElementById('c');
 const ctx    = canvas.getContext('2d');
 
+// iPadOS 13+ sends a desktop Safari user agent — maxTouchPoints catches it reliably
 const IS_MOBILE = /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
-               || ('ontouchstart' in window && window.innerWidth < 900);
+               || navigator.maxTouchPoints > 1
+               || ('ontouchstart' in window);
 
 let W, H;
 function resize() {
