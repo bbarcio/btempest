@@ -1020,9 +1020,9 @@ function update() {
     if (!hit){
       g.enemies=g.enemies.filter(e=>{
         if (e.type==='fuseball'&&e.lane===b.lane&&Math.abs(e.depth-b.depth)<0.1){
-          // Bullet passes through — small spark to show immunity
+          // Bullet passes through — visible spark burst to show immunity
           const fp=lanePos(e.lane,e.depth);
-          for(let i=0;i<3;i++){const a=rand(0,Math.PI*2);g.particles.push({x:fp.x,y:fp.y,vx:Math.cos(a)*1.5,vy:Math.sin(a)*1.5,life:0.4,decay:0.04,size:2,col:PAL.fuseball});}
+          for(let i=0;i<6;i++){const a=rand(0,Math.PI*2),s=rand(1.5,4);g.particles.push({x:fp.x,y:fp.y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:0.8,decay:0.025,size:rand(2.5,5),col:PAL.fuseball});}
           return true;
         }
         if (hit||e.lane!==b.lane||Math.abs(e.depth-b.depth)>0.1) return true;
