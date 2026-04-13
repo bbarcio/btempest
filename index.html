@@ -632,7 +632,10 @@ function sfxLevelUp() {
 // ─── GAME STATE ──────────────────────────────────
 let gs;
 function newGS() {
-  return { mode:'title',timer:0,score:0,hiScore:0,lives:3,level:1,
+  let savedHi=0, savedMaxLvl=1;
+  try { savedHi=parseInt(localStorage.getItem('btempest_hi')||'0',10);
+        savedMaxLvl=parseInt(localStorage.getItem('btempest_maxlvl')||'1',10); } catch(e){}
+  return { mode:'title',timer:0,score:0,hiScore:savedHi,maxLevel:savedMaxLvl,lives:3,level:1,
     waveCap:0,waveKilled:0,spawnTimer:0,spawnRate:90,zapUsed:0,flash:0,
     zoomScale:1, zoomVel:0,   // tube travel transition
     rimFlash: null,           // {lane, timer} flash when rim enemy is shot
@@ -641,18 +644,36 @@ function newGS() {
 }
 gs = newGS();
 
+// ─── TITLE SCREEN SELECTIONS ────────────────────
+let titleStartLevel = 1;
+const DIFFICULTIES  = ['EASY','NORMAL','HARD'];
+let titleDifficulty = 1;  // index into DIFFICULTIES, default NORMAL
+let titleRow        = 0;  // 0 = level, 1 = difficulty
+// Difficulty multipliers: [waveCap mult, spawnRate offset, enemy speed mult]
+const DIFF_CONF = [
+  { waveM:0.67, srBase:100, srScale:5, spdM:0.75 },  // EASY
+  { waveM:1.0,  srBase:90,  srScale:6, spdM:1.0  },  // NORMAL
+  { waveM:1.33, srBase:80,  srScale:7, spdM:1.3  },  // HARD
+];
+
 function startGame() {
   ensureAudio();
-  const hi = gs.hiScore; gs=newGS(); gs.hiScore=hi; gs.mode='playing';
+  const hi = gs.hiScore, ml = gs.maxLevel;
+  gs=newGS(); gs.hiScore=Math.max(hi,gs.hiScore); gs.maxLevel=Math.max(ml,gs.maxLevel);
+  gs.level=titleStartLevel; gs.difficulty=titleDifficulty;
+  gs.mode='playing';
   droneStarted=false;
   buildShapeSequence();   // fresh shuffle for this playthrough
+  // Advance shape sequence to match start level
+  for (let i=1;i<titleStartLevel;i++) nextShapeIdx();
   startDrone();
   loadLevel(true);
 }
 function loadLevel(newLevel) {
   gs.bullets=[]; gs.enemies=[]; gs.rimEnemy=[]; gs.spikes=[]; gs.particles=[];
   gs.zapUsed=0; gs.spawnTimer=0; gs.waveKilled=0;
-  gs.waveCap=6+gs.level*3; gs.spawnRate=Math.max(28,90-gs.level*6);
+  const dc=DIFF_CONF[gs.difficulty||1];
+  gs.waveCap=Math.round((6+gs.level*3)*dc.waveM); gs.spawnRate=Math.max(28,Math.round(dc.srBase-gs.level*dc.srScale));
   gs.player.lane=0; gs.player.laneFrac=0; gs.player.laneVel=0; gs.player.movCD=0; gs.player.shootCD=0;
   // Only advance the shape when genuinely starting a new level — not on death respawn
   if (newLevel || gs.levelShapeIdx === undefined) {
@@ -668,7 +689,8 @@ function spawnEnemy() {
   const lane=randi(0,N-1),r=Math.random();
   const fbChance = gs.level >= 3 ? Math.min(0.12 + (gs.level - 3) * 0.02, 0.25) : 0;
   const type=r<fbChance?'fuseball':r<fbChance+0.54*(1-fbChance)?'flipper':r<fbChance+(0.78)*(1-fbChance)?'tanker':'spiker';
-  const spd=rand(0.0018,0.003)+gs.level*0.00035;
+  const dSpdM=DIFF_CONF[gs.difficulty||1].spdM;
+  const spd=(rand(0.0018,0.003)+gs.level*0.00035)*dSpdM;
   gs.enemies.push({type,lane,depth:rand(0.91,0.97),
     speed:type==='spiker'?spd*2.2:type==='fuseball'?spd*0.6:spd,
     rot:rand(0,Math.PI*2),rotSpeed:type==='fuseball'?rand(-0.18,0.18):rand(-0.09,0.09),
@@ -750,7 +772,7 @@ function update() {
   if (g.mode==='dead') {
     updateParticles();
     if (g.timer<=0){
-      if (g.lives<=0){g.hiScore=Math.max(g.hiScore,g.score);g.mode='gameover';droneStarted=false;}
+      if (g.lives<=0){g.hiScore=Math.max(g.hiScore,g.score);try{localStorage.setItem('btempest_hi',g.hiScore);}catch(e){}g.mode='gameover';droneStarted=false;}
       else {g.mode='playing';loadLevel(false);}
     } return;
   }
@@ -761,6 +783,7 @@ function update() {
     g.zoomScale += g.zoomVel;
     if (g.zoomScale >= 22) {         // tube has fully rushed past — cut to next level
       g.level++;
+      if (g.level>g.maxLevel){g.maxLevel=g.level;try{localStorage.setItem('btempest_maxlvl',g.maxLevel);}catch(e){}}
       g.mode     = 'playing';
       g.zoomScale = 1;
       g.zoomVel   = 0;
@@ -1384,17 +1407,39 @@ function drawTitle(){
     ctx.fillText('Z            SUPERZAPPER',cx,cy0+sm*8.1);
     ctx.fillText('M            MUTE / UNMUTE',cx,cy0+sm*10.1);
   }
+  // ── Level select & difficulty ──
+  const selSz=Math.floor(dim/42);
+  ctx.font=`${selSz}px "IBM Plex Mono"`;
+  const selY=cy+dim*0.20;
+  const canLeft=titleStartLevel>1, canRight=titleStartLevel<gs.maxLevel;
+  const lvlActive=titleRow===0;
+  ctx.fillStyle=lvlActive?PAL.tubeActive:PAL.hud;
+  if (lvlActive) glow(PAL.aGlow,8);
+  const lvlArrowL=canLeft?'◄ ':'  ', lvlArrowR=canRight?' ►':'  ';
+  ctx.fillText(`${lvlArrowL}LEVEL ${titleStartLevel}${lvlArrowR}`,cx,selY);
+  if (lvlActive) noGlow();
+  const diffY=selY+selSz*1.8;
+  const diffActive=titleRow===1;
+  ctx.fillStyle=diffActive?PAL.tubeActive:PAL.hud;
+  if (diffActive) glow(PAL.aGlow,8);
+  ctx.fillText(`${titleDifficulty>0?'◄ ':'  '}${DIFFICULTIES[titleDifficulty]}${titleDifficulty<2?' ►':'  '}`,cx,diffY);
+  if (diffActive) noGlow();
+  if (!IS_MOBILE){
+    ctx.font=`${Math.floor(dim/58)}px "IBM Plex Mono"`;ctx.fillStyle='rgba(119,153,204,0.5)';
+    ctx.fillText('↑ ↓  SELECT  ·  ← →  CHANGE',cx,diffY+selSz*1.5);
+  }
+
   const blink=Math.sin(Date.now()/430)>0;
   ctx.font=`${Math.floor(dim/34)}px "IBM Plex Mono"`;
   ctx.fillStyle=blink?PAL.hudHi:PAL.hud;glow(PAL.player,blink?14:0);
-  ctx.fillText(IS_MOBILE?'TAP TO START':'PRESS SPACE TO START',cx,cy+dim*0.33);noGlow();
-  if (gs.hiScore>0){ctx.font=fsz(1/46);ctx.fillStyle=PAL.hud;ctx.fillText(`HI SCORE  ${gs.hiScore}`,cx,cy+dim*0.41);}
+  ctx.fillText(IS_MOBILE?'TAP TO START':'PRESS SPACE TO START',cx,cy+dim*0.40);noGlow();
+  if (gs.hiScore>0){ctx.font=fsz(1/46);ctx.fillStyle=PAL.hud;ctx.fillText(`HI SCORE  ${gs.hiScore}`,cx,cy+dim*0.47);}
 
   // Nudge first-time mobile visitors to install
   if (IS_MOBILE && !navigator.standalone) {
     ctx.font=`${Math.floor(dim/58)}px "IBM Plex Mono"`;
     ctx.fillStyle='rgba(119,153,204,0.55)';
-    ctx.fillText('SHARE  ↑  →  ADD TO HOME SCREEN', cx, cy + dim * 0.52);
+    ctx.fillText('SHARE  ↑  →  ADD TO HOME SCREEN', cx, cy + dim * 0.55);
   }
   if (IS_MOBILE) drawZapButton();
 }
@@ -1424,9 +1469,22 @@ function drawLevelUp(){
 // ─── KEYBOARD INPUT ──────────────────────────────
 const keys={};
 window.addEventListener('keydown',e=>{
-  const handled=['Space','ArrowLeft','ArrowRight','ArrowUp','KeyA','KeyD','KeyX','KeyZ','KeyM'];
+  const handled=['Space','ArrowLeft','ArrowRight','ArrowUp','ArrowDown','KeyA','KeyD','KeyX','KeyZ','KeyM'];
   if (handled.includes(e.code)) e.preventDefault();
   keys[e.code]=true;
+  // ── Title screen: level & difficulty selection ──
+  if (gs.mode==='title'){
+    if (e.code==='ArrowUp'||e.code==='KeyW')   titleRow=Math.max(0,titleRow-1);
+    if (e.code==='ArrowDown'||e.code==='KeyS') titleRow=Math.min(1,titleRow+1);
+    if (e.code==='ArrowLeft'||e.code==='KeyA'){
+      if (titleRow===0) titleStartLevel=Math.max(1,titleStartLevel-1);
+      else              titleDifficulty=Math.max(0,titleDifficulty-1);
+    }
+    if (e.code==='ArrowRight'||e.code==='KeyD'){
+      if (titleRow===0) titleStartLevel=Math.min(gs.maxLevel,titleStartLevel+1);
+      else              titleDifficulty=Math.min(2,titleDifficulty+1);
+    }
+  }
   if (e.code==='Space'){ensureAudio();if(gs.mode==='title')startGame();if(gs.mode==='gameover')gs.mode='title';}
   if (e.code==='KeyZ') activateZapper();
   if (e.code==='KeyM'){ensureAudio();toggleMute();}
@@ -1473,8 +1531,29 @@ canvas.addEventListener('touchstart',e=>{
     activateZapper();return;
   }
 
-  // Start game
-  if (gs.mode==='title'){startGame();return;}
+  // Title screen: level/difficulty touch selectors
+  if (gs.mode==='title'){
+    const tcy=IS_MOBILE?gameH()/2:H/2;
+    const tdim=Math.min(W,gameH());
+    const tSelY=tcy+tdim*0.20;
+    const tSelSz=Math.floor(tdim/42);
+    const tDiffY=tSelY+tSelSz*1.8;
+    const hitH=tSelSz*1.2;
+    // Check level row
+    if (Math.abs(y-tSelY)<hitH){
+      if (x<W/2 && titleStartLevel>1){ titleStartLevel--; return; }
+      if (x>=W/2 && titleStartLevel<gs.maxLevel){ titleStartLevel++; return; }
+      return; // tap on row but no change possible
+    }
+    // Check difficulty row
+    if (Math.abs(y-tDiffY)<hitH){
+      if (x<W/2 && titleDifficulty>0){ titleDifficulty--; return; }
+      if (x>=W/2 && titleDifficulty<2){ titleDifficulty++; return; }
+      return;
+    }
+    // Anywhere else on title → start
+    startGame();return;
+  }
   if (gs.mode==='gameover'){gs.mode='title';return;}
 
   // Claim this touch as the movement finger
